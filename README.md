@@ -16,6 +16,45 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Supabase-Datenmodell
+
+Die Matrix liest Länder, Kategorien, Applikationen und Zuordnungen dynamisch aus Supabase. Für mehrere Applikationen in einer Zelle wird pro Zuordnung eine eigene Zeile in `country_app_assignments` gespeichert.
+
+```sql
+create table if not exists public.applications (
+	id uuid primary key default gen_random_uuid(),
+	name text not null unique,
+	sort_order int
+);
+
+alter table public.country_app_assignments
+	add column if not exists application_id uuid references public.applications(id) on delete cascade;
+
+alter table public.country_app_assignments
+	drop constraint if exists country_app_assignments_country_id_app_category_id_key;
+
+create unique index if not exists country_app_assignments_unique_application
+	on public.country_app_assignments (country_id, app_category_id, application_id);
+```
+
+Beispiel für zwei Applikationen in derselben Zelle:
+
+```sql
+insert into public.applications (name, sort_order)
+values ('SAP', 1), ('SAP Business One', 2)
+on conflict (name) do nothing;
+
+insert into public.country_app_assignments (country_id, app_category_id, application_id)
+select c.id, cat.id, a.id
+from public.countries c
+cross join public.app_categories cat
+cross join public.applications a
+where c.name = 'Deutschland'
+	and cat.name = 'ERP'
+	and a.name in ('SAP', 'SAP Business One')
+on conflict do nothing;
+```
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

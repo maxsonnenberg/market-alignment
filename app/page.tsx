@@ -15,10 +15,16 @@ type AppCategory = {
   sort_order?: number | null
 }
 
+type Application = {
+  id: string
+  name: string
+  sort_order?: number | null
+}
+
 type CountryAppAssignment = {
   country_id: string
   app_category_id: string
-  app_name: string | null
+  application_id: string
 }
 
 const defaultCountries = [
@@ -36,17 +42,11 @@ const defaultCountries = [
 
 const defaultCategories = ['ERP', 'Onlinesshop', 'App', 'Kasse'] as const
 
-const defaultValues: Record<string, Record<string, string>> = {
-  Deutschland: { ERP: 'SAP', Onlinesshop: 'Shopware', App: 'Customer Portal', Kasse: 'POS' },
-  Polen: { ERP: 'Comarch', Onlinesshop: 'Shoper', App: 'Mobile App', Kasse: 'Kassa Pro' },
-  Ungarn: { ERP: 'NAV', Onlinesshop: 'Webshop', App: 'B2B Portal', Kasse: 'POS Lite' },
-  Tschechien: { ERP: 'S4 Hana', Onlinesshop: 'eShop', App: 'Field App', Kasse: 'Cash Desk' },
-  Albanien: { ERP: 'ERP Plus', Onlinesshop: 'AlbShop', App: 'Service App', Kasse: 'CashBox' },
-  Kosovo: { ERP: 'ERP Flex', Onlinesshop: 'Kosovo Shop', App: 'App Suite', Kasse: 'Kasse 1' },
-  Spanien: { ERP: 'Dynamics', Onlinesshop: 'Tiendan', App: 'Mobile Suite', Kasse: 'Caja' },
-  Türkei: { ERP: 'NetSuite', Onlinesshop: 'TrShop', App: 'Türk App', Kasse: 'POS TR' },
-  Schweiz: { ERP: 'SAP', Onlinesshop: 'Shopify', App: 'Swiss App', Kasse: 'Kasse CH' },
-  Dänemark: { ERP: 'Dynamics', Onlinesshop: 'NordShop', App: 'DK App', Kasse: 'POS DK' },
+const defaultApplications = ['SAP', 'Shopware', 'Customer Portal', 'POS', 'Comarch', 'Shoper', 'Mobile App', 'Kassa Pro'] as const
+
+const defaultAssignments: Record<string, Record<string, string[]>> = {
+  Deutschland: { ERP: ['SAP'], Onlinesshop: ['Shopware'], App: ['Customer Portal'], Kasse: ['POS'] },
+  Polen: { ERP: ['Comarch'], Onlinesshop: ['Shoper'], App: ['Mobile App'], Kasse: ['Kassa Pro'] },
 }
 
 function isMissingTableError(error: { code?: string; message?: string } | null) {
@@ -73,14 +73,25 @@ function getFallbackCategories(): AppCategory[] {
   }))
 }
 
+function getFallbackApplications(): Application[] {
+  return defaultApplications.map((applicationName, index) => ({
+    id: `application-${index + 1}`,
+    name: applicationName,
+    sort_order: index + 1,
+  }))
+}
+
 function createInitialMatrix() {
-  const matrix: Record<string, Record<string, string>> = {}
+  const matrix: Record<string, Record<string, string[]>> = {}
+  const applications = getFallbackApplications()
 
   getFallbackCategories().forEach((category) => {
     matrix[category.id] = {}
 
     getFallbackCountries().forEach((country) => {
-      matrix[category.id][country.id] = defaultValues[country.name]?.[category.name] ?? '—'
+      matrix[category.id][country.id] = (defaultAssignments[country.name]?.[category.name] ?? [])
+        .map((name) => applications.find((application) => application.name === name)?.name)
+        .filter((name): name is string => Boolean(name))
     })
   })
 
@@ -90,19 +101,24 @@ function createInitialMatrix() {
 function createMatrixFromAssignments(
   countries: Country[],
   categories: AppCategory[],
+  applications: Application[],
   assignments: CountryAppAssignment[]
 ) {
-  const matrix: Record<string, Record<string, string>> = {}
+  const matrix: Record<string, Record<string, string[]>> = {}
 
   categories.forEach((category) => {
     matrix[category.id] = {}
 
     countries.forEach((country) => {
-      const match = assignments.find(
-        (entry) => entry.country_id === country.id && entry.app_category_id === category.id
-      )
+      const applicationIds = assignments
+        .filter(
+          (entry) => entry.country_id === country.id && entry.app_category_id === category.id
+        )
+        .map((entry) => entry.application_id)
 
-      matrix[category.id][country.id] = match?.app_name || '—'
+      matrix[category.id][country.id] = applicationIds
+        .map((applicationId) => applications.find((application) => application.id === applicationId)?.name)
+        .filter((name): name is string => Boolean(name))
     })
   })
 
@@ -112,13 +128,13 @@ function createMatrixFromAssignments(
 export default function Page() {
   const [countries, setCountries] = useState<Country[]>(() => getFallbackCountries())
   const [categories, setCategories] = useState<AppCategory[]>(() => getFallbackCategories())
-  const [matrix, setMatrix] = useState<Record<string, Record<string, string>>>(() => createInitialMatrix())
+  const [matrix, setMatrix] = useState<Record<string, Record<string, string[]>>>(() => createInitialMatrix())
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [countriesResponse, categoriesResponse, assignmentsResponse] = await Promise.all([
+        const [countriesResponse, categoriesResponse, applicationsResponse, assignmentsResponse] = await Promise.all([
           supabase
             .from('countries')
             .select('id, name, sort_order')
@@ -127,7 +143,11 @@ export default function Page() {
             .from('app_categories')
             .select('id, name, sort_order')
             .order('sort_order', { ascending: true, nullsFirst: false }),
-          supabase.from('country_app_assignments').select('country_id, app_category_id, app_name'),
+          supabase
+            .from('applications')
+            .select('id, name, sort_order')
+            .order('sort_order', { ascending: true, nullsFirst: false }),
+          supabase.from('country_app_assignments').select('country_id, app_category_id, application_id'),
         ])
 
         const countryRows =
@@ -144,6 +164,13 @@ export default function Page() {
               ? (categoriesResponse.data as AppCategory[])
               : getFallbackCategories()
 
+        const applicationRows =
+          applicationsResponse.error && isMissingTableError(applicationsResponse.error)
+            ? getFallbackApplications()
+            : applicationsResponse.data?.length
+              ? (applicationsResponse.data as Application[])
+              : getFallbackApplications()
+
         const assignments =
           assignmentsResponse.error && isMissingTableError(assignmentsResponse.error)
             ? []
@@ -151,7 +178,7 @@ export default function Page() {
 
         setCountries(countryRows)
         setCategories(categoryRows)
-        setMatrix(createMatrixFromAssignments(countryRows, categoryRows, assignments))
+        setMatrix(createMatrixFromAssignments(countryRows, categoryRows, applicationRows, assignments))
       } catch (error) {
         console.error('Failed to load app matrix data:', error)
         setCountries(getFallbackCountries())
@@ -212,7 +239,18 @@ export default function Page() {
                         key={`${category.id}-${country.id}`}
                         className="border-l border-slate-200 px-4 py-3 text-slate-700"
                       >
-                        {matrix[category.id]?.[country.id] ?? '—'}
+                        {matrix[category.id]?.[country.id]?.length ? (
+                          <ul className="space-y-1">
+                            {matrix[category.id][country.id].map((applicationName, index) => (
+                              <li key={`${applicationName}-${index}`} className="flex items-start gap-2">
+                                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-sky-500" />
+                                <span>{applicationName}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                     ))}
                   </tr>
