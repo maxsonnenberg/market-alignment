@@ -1,6 +1,7 @@
 'use client'
 
 import { supabase } from '@/lib/supabaseClient'
+import packageJson from '../package.json'
 import { useEffect, useMemo, useState } from 'react'
 
 type Country = {
@@ -232,7 +233,7 @@ export default function Page() {
               </div>
             )}
             <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full border-collapse text-left text-sm">
+              <table className="min-w-full border-collapse text-left text-sm">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="sticky left-0 z-10 border-b border-r border-slate-200 bg-slate-50 px-4 py-3 font-semibold text-slate-700">
@@ -278,10 +279,37 @@ export default function Page() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
             </div>
+
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">Daten in Textform</h2>
+              <div className="mt-4 space-y-4 text-sm text-slate-700">
+                {countries.map((country) => (
+                  <div key={country.id}>
+                    <h3 className="font-semibold text-slate-900">{country.name}</h3>
+                    <ul className="mt-1 space-y-1 pl-4">
+                      {categories.map((category) => {
+                        const applicationNames = matrix[category.id]?.[country.id] ?? []
+
+                        return (
+                          <li key={`${country.id}-${category.id}`}>
+                            <span className="font-medium">{category.name}:</span>{' '}
+                            {applicationNames.length > 0 ? applicationNames.join(', ') : 'keine Applikation'}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </section>
           </>
         )}
+
+        <footer className="mt-5 text-right text-xs text-slate-400">
+          Build-Version {packageJson.version}
+        </footer>
       </div>
     </main>
   )
