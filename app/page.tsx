@@ -57,6 +57,10 @@ function isMissingTableError(error: { code?: string; message?: string } | null) 
   return error.code === '42P01' || error.message?.toLowerCase().includes('does not exist')
 }
 
+function getErrorMessage(error: { message?: string } | null) {
+  return error?.message || 'Unbekannter Fehler beim Laden der Daten.'
+}
+
 function getFallbackCountries(): Country[] {
   return defaultCountries.map((countryName, index) => ({
     id: `country-${index + 1}`,
@@ -130,6 +134,7 @@ export default function Page() {
   const [categories, setCategories] = useState<AppCategory[]>(() => getFallbackCategories())
   const [matrix, setMatrix] = useState<Record<string, Record<string, string[]>>>(() => createInitialMatrix())
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadData() {
@@ -138,49 +143,60 @@ export default function Page() {
           supabase
             .from('countries')
             .select('id, name, sort_order')
-            .order('sort_order', { ascending: true, nullsFirst: false }),
+            .order('sort_order', { ascending: true }),
           supabase
             .from('app_categories')
             .select('id, name, sort_order')
-            .order('sort_order', { ascending: true, nullsFirst: false }),
+            .order('sort_order', { ascending: true }),
           supabase
             .from('applications')
             .select('id, name, sort_order')
-            .order('sort_order', { ascending: true, nullsFirst: false }),
+            .order('sort_order', { ascending: true }),
           supabase.from('country_app_assignments').select('country_id, app_category_id, application_id'),
         ])
 
         const countryRows =
-          countriesResponse.error && isMissingTableError(countriesResponse.error)
+          countriesResponse.error
             ? getFallbackCountries()
             : countriesResponse.data?.length
               ? (countriesResponse.data as Country[])
               : getFallbackCountries()
 
         const categoryRows =
-          categoriesResponse.error && isMissingTableError(categoriesResponse.error)
+          categoriesResponse.error
             ? getFallbackCategories()
             : categoriesResponse.data?.length
               ? (categoriesResponse.data as AppCategory[])
               : getFallbackCategories()
 
         const applicationRows =
-          applicationsResponse.error && isMissingTableError(applicationsResponse.error)
+          applicationsResponse.error
             ? getFallbackApplications()
             : applicationsResponse.data?.length
               ? (applicationsResponse.data as Application[])
               : getFallbackApplications()
 
         const assignments =
-          assignmentsResponse.error && isMissingTableError(assignmentsResponse.error)
-            ? []
-            : (assignmentsResponse.data as CountryAppAssignment[]) || []
+          (assignmentsResponse.error ? [] : assignmentsResponse.data) as CountryAppAssignment[] || []
+
+        const errors = [
+          countriesResponse.error,
+          categoriesResponse.error,
+          applicationsResponse.error,
+          assignmentsResponse.error,
+        ].filter((error) => error && !isMissingTableError(error))
+
+        if (errors.length > 0) {
+          console.error('Supabase matrix errors:', errors)
+          setLoadError(getErrorMessage(errors[0]))
+        }
 
         setCountries(countryRows)
         setCategories(categoryRows)
         setMatrix(createMatrixFromAssignments(countryRows, categoryRows, applicationRows, assignments))
       } catch (error) {
         console.error('Failed to load app matrix data:', error)
+        setLoadError(error instanceof Error ? error.message : 'Daten konnten nicht geladen werden.')
         setCountries(getFallbackCountries())
         setCategories(getFallbackCategories())
         setMatrix(createInitialMatrix())
@@ -209,7 +225,13 @@ export default function Page() {
             <p className="text-slate-600">Daten werden geladen...</p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <>
+            {loadError && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Datenbankhinweis: {loadError}
+              </div>
+            )}
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
             <table className="min-w-full border-collapse text-left text-sm">
               <thead className="bg-slate-50">
                 <tr>
@@ -257,7 +279,8 @@ export default function Page() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </main>
